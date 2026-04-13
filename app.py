@@ -128,10 +128,24 @@ def download_single_adjusted_close(ticker: str, start_date: date, end_date: date
     if raw is None or raw.empty:
         raise ValueError(f"{ticker}: no data returned")
 
-    if "Adj Close" not in raw.columns:
+    if isinstance(raw.columns, pd.MultiIndex):
+        if "Adj Close" not in raw.columns.get_level_values(0):
+            raise ValueError(f"{ticker}: adjusted close data unavailable")
+        extracted = raw["Adj Close"]
+        if isinstance(extracted, pd.DataFrame):
+            if ticker in extracted.columns:
+                series = extracted[ticker].copy()
+            elif extracted.shape[1] == 1:
+                series = extracted.iloc[:, 0].copy()
+            else:
+                raise ValueError(f"{ticker}: adjusted close data unavailable")
+        else:
+            series = extracted.copy()
+    elif "Adj Close" not in raw.columns:
         raise ValueError(f"{ticker}: adjusted close data unavailable")
+    else:
+        series = raw["Adj Close"].copy()
 
-    series = raw["Adj Close"].copy()
     series.name = ticker
     if series.dropna().empty:
         raise ValueError(f"{ticker}: adjusted close series is empty")
