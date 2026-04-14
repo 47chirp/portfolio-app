@@ -375,6 +375,16 @@ def optimize_tangency(returns: pd.DataFrame, rf_annual: float) -> Optional[np.nd
     return result.x
 
 
+@st.cache_data
+def cached_gmv(returns):
+    return optimize_gmv(returns)
+
+
+@st.cache_data
+def cached_tangency(returns, rf_annual):
+    return optimize_tangency(returns, rf_annual)
+
+
 def percentage_risk_contribution(weights: np.ndarray, cov_matrix: pd.DataFrame) -> np.ndarray:
     cov = cov_matrix.values
     sigma2 = float(weights.T @ cov @ weights)
@@ -817,8 +827,8 @@ with tabs[3]:
     eq_port_rets = portfolio_daily_returns(stock_returns, eq_weights)
 
     with st.spinner("Running GMV and tangency optimization with no-short constraints..."):
-        gmv_weights = optimize_gmv(stock_returns)
-        tan_weights = optimize_tangency(stock_returns, rf_annual)
+        gmv_weights = cached_gmv(stock_returns)
+        tan_weights = cached_tangency(stock_returns, rf_annual)
 
     if gmv_weights is None:
         st.error("GMV optimization failed. Try changing tickers or date range.")
@@ -895,7 +905,7 @@ with tabs[3]:
     if gmv_weights is not None or tan_weights is not None:
         st.subheader("Percentage Risk Contribution (PRC)")
         st.info(
-            "Risk contribution can differ from weight. A stock can contribute more risk than its weight if covariance is high."
+            "Risk contribution can differ from weight. A stock can contribute more risk than its weight if covariance is high. For example, a stock with a 10% portfolio weight but 25% risk contribution is a disproportionate source of portfolio volatility."
         )
         cov_daily = stock_returns.cov()
 
