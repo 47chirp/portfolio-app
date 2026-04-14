@@ -828,10 +828,17 @@ with tabs[3]:
     st.subheader("Custom Portfolio")
     st.write("Set raw slider values. The app normalizes them so normalized weights sum to 1.")
     slider_cols = st.columns(min(5, n_assets))
+    ticker_signature = "_".join(tickers)
     raw_custom_values: Dict[str, int] = {}
     for i, t in enumerate(tickers):
         with slider_cols[i % len(slider_cols)]:
-            raw_custom_values[t] = st.slider(f"{t}", 0, 100, int(round(100 / n_assets)), key=f"custom_{t}")
+            raw_custom_values[t] = st.slider(
+                f"{t}",
+                0,
+                100,
+                int(round(100 / n_assets)),
+                key=f"custom_{ticker_signature}_{t}",
+            )
 
     raw_custom = np.array([raw_custom_values[t] for t in tickers], dtype=float)
     if raw_custom.sum() <= 0:
