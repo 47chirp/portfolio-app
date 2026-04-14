@@ -152,7 +152,6 @@ def download_single_adjusted_close(ticker: str, start_date: date, end_date: date
     return series
 
 
-@st.cache_data(ttl=3600)
 def download_adjusted_close(
     tickers: Tuple[str, ...],
     start_date: date,
