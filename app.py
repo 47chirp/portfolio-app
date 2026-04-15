@@ -344,8 +344,8 @@ def optimize_gmv(returns: pd.DataFrame) -> Optional[np.ndarray]:
     constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1.0},)
 
     def obj(w: np.ndarray) -> float:
-        # Portfolio variance: w^T Sigma w
-        return float(w.T @ cov @ w)
+        # Annualized portfolio variance (scaled for SLSQP numerical stability)
+        return float(w.T @ cov @ w) * TRADING_DAYS
 
     result = minimize(obj, x0=x0, method="SLSQP", bounds=bounds, constraints=constraints)
     if not result.success:
@@ -601,14 +601,55 @@ if run_analysis:
                 st.info(note)
 
 
+# ==============================
+# Tab 6: Methodology (rendered unconditionally before any st.stop)
+# ==============================
+with tabs[5]:
+    st.header("About and Methodology")
+    st.markdown(
+        """
+### Data and Returns
+- Data source: yfinance adjusted close prices.
+- Assets analyzed: user-selected stocks plus benchmark ^GSPC for comparison.
+- Portfolio optimization excludes the benchmark.
+- Return convention: simple daily arithmetic returns from `pct_change()`.
+
+### Annualization and Risk-Free Rate
+- Annualized return = mean daily return * 252.
+- Annualized volatility = std daily return * sqrt(252).
+- User enters annualized risk-free rate.
+- Daily risk-free rate = annualized risk-free rate / 252.
+
+### Risk Metrics
+- Sharpe ratio uses excess daily return relative to daily risk-free rate.
+- Sortino ratio uses downside deviation relative to daily risk-free rate.
+- Drawdown is computed from cumulative wealth `(1 + r).cumprod()`.
+
+### Optimization Setup
+- No short selling.
+- Bounds on each weight: 0 to 1.
+- Equality constraint: sum(weights) = 1.
+- GMV portfolio minimizes variance `w^T Sigma w`.
+- Tangency portfolio maximizes Sharpe via minimizing negative Sharpe.
+- Efficient frontier is solved via constrained optimization at target returns.
+- CAL is drawn from risk-free rate through the tangency portfolio.
+
+### Risk Contribution
+- Percentage risk contribution for asset i:
+  - PRC_i = w_i * (Sigma w)_i / sigma_p^2
+- PRCs should sum to 1 up to numerical tolerance.
+
+### Robustness and Deployment
+- Expensive computations use `@st.cache_data(ttl=3600)`.
+- The app includes input validation and user-friendly error handling for common mistakes.
+"""
+    )
+
 bundle = st.session_state.get("analysis_bundle")
 if bundle is None:
     with tabs[0]:
         st.info("Configure inputs in the sidebar and click 'Fetch data and run analysis'.")
         st.write("This app requires 3 to 10 valid tickers and at least 2 years of data.")
-    with tabs[5]:
-        st.subheader("About this app")
-        st.write("The app performs exploratory analysis, risk analytics, and constrained portfolio optimization.")
     st.stop()
 
 
@@ -1094,78 +1135,44 @@ with tabs[4]:
     feasible = [(lbl, win) for lbl, win in candidates if n_obs >= win]
     feasible.append(("Full Sample", 0))
 
-    st.write("Only lookback windows feasible for your selected date range are shown.")
-
-    with st.spinner("Running optimization across lookback windows..."):
-        sens_table, sens_weights_long = sensitivity_analysis(stock_returns, rf_annual, tuple(feasible))
-
-    if sens_table.empty:
-        st.warning("Sensitivity analysis could not be generated.")
-    else:
-        st.subheader("Sensitivity Comparison Table")
-        st.dataframe(sens_table, use_container_width=True)
-
-    if not sens_weights_long.empty:
-        st.subheader("Weights Across Lookback Windows")
-        portfolio_choice = st.selectbox("Portfolio type", ["GMV", "Tangency"])
-        plot_df = sens_weights_long[sens_weights_long["Portfolio"] == portfolio_choice]
-        fig_sens = px.bar(
-            plot_df,
-            x="Window",
-            y="Weight",
-            color="Ticker",
-            barmode="group",
-            title=f"{portfolio_choice} Weights Across Lookback Windows",
-        )
-        fig_sens.update_layout(xaxis_title="Lookback Window", yaxis_title="Weight")
-        st.plotly_chart(fig_sens, use_container_width=True)
+    feasible_labels = [lbl for lbl, _ in feasible]
+    selected_labels = st.multiselect(
+        "Select lookback windows to compare",
+        options=feasible_labels,
+        default=feasible_labels,
+        help="Only windows supported by your selected date range are listed.",
+    )
 
     st.info(
         "Optimization is sensitive to estimated means and covariances, so weights and performance "
         "can change across estimation windows."
     )
 
+    if not selected_labels:
+        st.warning("Select at least one lookback window above to run the analysis.")
+    else:
+        selected_feasible = [(lbl, win) for lbl, win in feasible if lbl in selected_labels]
 
-# ==============================
-# Tab 6: Methodology
-# ==============================
-with tabs[5]:
-    st.header("About and Methodology")
-    st.markdown(
-        """
-### Data and Returns
-- Data source: yfinance adjusted close prices.
-- Assets analyzed: user-selected stocks plus benchmark ^GSPC for comparison.
-- Portfolio optimization excludes the benchmark.
-- Return convention: simple daily arithmetic returns from `pct_change()`.
+        with st.spinner("Running optimization across lookback windows..."):
+            sens_table, sens_weights_long = sensitivity_analysis(stock_returns, rf_annual, tuple(selected_feasible))
 
-### Annualization and Risk-Free Rate
-- Annualized return = mean daily return * 252.
-- Annualized volatility = std daily return * sqrt(252).
-- User enters annualized risk-free rate.
-- Daily risk-free rate = annualized risk-free rate / 252.
+        if sens_table.empty:
+            st.warning("Sensitivity analysis could not be generated.")
+        else:
+            st.subheader("Sensitivity Comparison Table")
+            st.dataframe(sens_table, use_container_width=True)
 
-### Risk Metrics
-- Sharpe ratio uses excess daily return relative to daily risk-free rate.
-- Sortino ratio uses downside deviation relative to daily risk-free rate.
-- Drawdown is computed from cumulative wealth `(1 + r).cumprod()`.
-
-### Optimization Setup
-- No short selling.
-- Bounds on each weight: 0 to 1.
-- Equality constraint: sum(weights) = 1.
-- GMV portfolio minimizes variance `w^T Sigma w`.
-- Tangency portfolio maximizes Sharpe via minimizing negative Sharpe.
-- Efficient frontier is solved via constrained optimization at target returns.
-- CAL is drawn from risk-free rate through the tangency portfolio.
-
-### Risk Contribution
-- Percentage risk contribution for asset i:
-  - PRC_i = w_i * (Sigma w)_i / sigma_p^2
-- PRCs should sum to 1 up to numerical tolerance.
-
-### Robustness and Deployment
-- Expensive computations use `@st.cache_data(ttl=3600)`.
-- The app includes input validation and user-friendly error handling for common mistakes.
-"""
-    )
+        if not sens_weights_long.empty:
+            st.subheader("Weights Across Lookback Windows")
+            portfolio_choice = st.selectbox("Portfolio type", ["GMV", "Tangency"])
+            plot_df = sens_weights_long[sens_weights_long["Portfolio"] == portfolio_choice]
+            fig_sens = px.bar(
+                plot_df,
+                x="Window",
+                y="Weight",
+                color="Ticker",
+                barmode="group",
+                title=f"{portfolio_choice} Weights Across Lookback Windows",
+            )
+            fig_sens.update_layout(xaxis_title="Lookback Window", yaxis_title="Weight")
+            st.plotly_chart(fig_sens, use_container_width=True)
